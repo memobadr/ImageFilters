@@ -1,0 +1,432 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Drawing;
+using System.Windows.Forms;
+using System.Drawing.Imaging;
+
+namespace ImageFilters
+{
+    public class ImageOperations
+    {
+        public static byte[,] OpenImage(string ImagePath)
+        {
+            Bitmap original_bm = new Bitmap(ImagePath);//o(n)
+            int Height = original_bm.Height;//o(1)
+            int Width = original_bm.Width;//o(1)
+
+            byte[,] Buffer = new byte[Height, Width];//o(1)
+
+            unsafe
+            {
+                BitmapData bmd = original_bm.LockBits(new Rectangle(0, 0, Width, Height), ImageLockMode.ReadWrite, original_bm.PixelFormat);//
+                int x, y;//o(1)
+                int nWidth = 0;//o(1)
+                bool Format32 = false;//o(1)
+                bool Format24 = false;//o(1)
+                bool Format8 = false;//o(1)
+
+                if (original_bm.PixelFormat == PixelFormat.Format24bppRgb)//o(1)
+                {
+                    Format24 = true;//o(1)
+                    nWidth = Width * 3;//o(1)
+                }
+                else if (original_bm.PixelFormat == PixelFormat.Format32bppArgb || original_bm.PixelFormat == PixelFormat.Format32bppRgb || original_bm.PixelFormat == PixelFormat.Format32bppPArgb)//o(1)
+                {
+                    Format32 = true;//o(1)
+                    nWidth = Width * 4;//o(1)
+                }
+                else if (original_bm.PixelFormat == PixelFormat.Format8bppIndexed)
+                {
+                    Format8 = true;//o(1)
+                    nWidth = Width;//o(1)
+                }
+                int nOffset = bmd.Stride - nWidth;
+                byte* p = (byte*)bmd.Scan0;
+                for (y = 0; y < Height; y++)
+                {
+                    for (x = 0; x < Width; x++)
+                    {
+                        if (Format8)
+                        {
+                            Buffer[y, x] = p[0];
+                            p++;
+                        }
+                        else
+                        {
+                            Buffer[y, x] = (byte)((int)(p[0] + p[1] + p[2]) / 3);
+                            if (Format24) p += 3;
+                            else if (Format32) p += 4;
+                        }
+                    }
+                    p += nOffset;
+                }
+                original_bm.UnlockBits(bmd);
+            }
+
+            return Buffer;
+        }
+        public static int GetHeight(byte[,] ImageMatrix)
+        {
+            return ImageMatrix.GetLength(0);
+        }
+        public static int GetWidth(byte[,] ImageMatrix)
+        {
+            return ImageMatrix.GetLength(1);
+        }
+        public static void DisplayImage(byte[,] ImageMatrix, PictureBox PicBox)
+        {
+            // Create Image:
+            //==============
+            int Height = ImageMatrix.GetLength(0);
+            int Width = ImageMatrix.GetLength(1);
+
+            Bitmap ImageBMP = new Bitmap(Width, Height, PixelFormat.Format24bppRgb);
+
+            unsafe
+            {
+                BitmapData bmd = ImageBMP.LockBits(new Rectangle(0, 0, Width, Height), ImageLockMode.ReadWrite, ImageBMP.PixelFormat);
+                int nWidth = 0;//o(1)
+                nWidth = Width * 3;//o(1)
+                int nOffset = bmd.Stride - nWidth;
+                byte* p = (byte*)bmd.Scan0;
+                for (int i = 0; i < Height; i++)
+                {
+                    for (int j = 0; j < Width; j++)
+                    {
+                        p[0] = p[1] = p[2] = ImageMatrix[i, j];
+                        p += 3;//o(1)
+                    }
+
+                    p += nOffset;//o(1)
+                }
+                ImageBMP.UnlockBits(bmd);
+            }
+            PicBox.Image = ImageBMP;
+        }
+
+        public static byte SelectKth(byte[] arr, int left, int right, int k)
+        {
+            if (left == right) return arr[left]; //o(1)
+
+            int pivotIndex = Partition(arr, left, right);//o(n)
+
+            if (k == pivotIndex)//o(1)
+                return arr[k];//o(1)
+            else if (k < pivotIndex) //o(1)
+                return SelectKth(arr, left, pivotIndex - 1, k);
+            else
+                return SelectKth(arr, pivotIndex + 1, right, k);  overall complexity average :theta(n), worst case :o(n^2)
+        }
+
+        private static int Partition(byte[] arr, int left, int right)
+        {
+            byte pivotValue = arr[right];//o(1)
+            int i = left;//o(1)
+            for (int j = left; j < right; j++)//exact (n)
+            {
+                if (arr[j] < pivotValue)//o(1)
+                {
+                    // Swap arr[i] and arr[j]
+                    byte temp = arr[i];//o(1)
+                    arr[i] = arr[j];//o(1)
+                    arr[j] = temp;//o(1)
+                    i++;//o(1)
+                }
+            }
+            // Swap pivot into final place
+            arr[right] = arr[i];//o(1)
+            arr[i] = pivotValue;//o(1)
+            return i;//o(1)  overall exact(n)
+        }
+
+        public static byte[,] KthFilter(byte[,] ImageMatrix, int windowSize)
+        {
+            int width = GetWidth(ImageMatrix);//o(1)
+            int height = GetHeight(ImageMatrix);//o(1)
+            byte[,] resultImage = new byte[height, width];//o(w*h)
+
+            int edge = windowSize / 2;//o(1)
+            int kIndex = (windowSize * windowSize) / 2; // The index of the median,//o(1)
+
+            for (int y = 0; y < height; y++)//o(h)
+            { 
+                for (int x = 0; x < width; x++)//o(w)
+                {
+                    byte[] window = new byte[windowSize * windowSize];//o(w^2)
+                    int count = 0;//o(1)
+
+                    // Fill the window with neighboring pixels
+                    for (int wy = -edge; wy <= edge; wy++)//o(w)
+                    {
+                        for (int wx = -edge; wx <= edge; wx++)//o(w)
+                        {
+                            int neighborY = y + wy;//o(1)
+                            int neighborX = x + wx;//o(1)
+
+                            // Boundary Check: If outside, use the closest edge pixel
+                            if (neighborY < 0) neighborY = 0; //o(1)
+                            if (neighborY >= height) neighborY = height - 1;//o(1)
+                            if (neighborX < 0) neighborX = 0;//o(1)
+                            if (neighborX >= width) neighborX = width - 1;//o(1)
+
+                            window[count++] = ImageMatrix[neighborY, neighborX];//o(1)
+                        }
+                    }
+
+                    // Find the Kth smallest element (the median)
+                    resultImage[y, x] = SelectKth(window, 0, window.Length - 1, kIndex);//average :theta(windowsize^2) , worst o(windowsize^4)
+                }
+            }
+            return resultImage;//o(1),overall complexity: average theta(h*w*windowsize^2),worst o(h*w*windowsize^4)
+        }
+
+        // ===== Midpoint Filter (Non-Efficient) =====
+        // Collects neighbors into an array, then finds max & min with separate loops
+        public static byte[,] ApplyMidpointNonEfficient(byte[,] ImageMatrix, int windowSize)
+        {
+            int height = GetHeight(ImageMatrix); //o(1)
+            int width = GetWidth(ImageMatrix);//o(1)
+            byte[,] newimage = new byte[height, width];//o(h*w)
+            int edge = windowSize / 2;//o(1)
+            int totalNeighbors = windowSize * windowSize;//o(1)
+
+            for (int i = edge; i < height - edge; i++)//o(h)
+            {
+                for (int j = edge; j < width - edge; j++)//o(w)
+                {
+                    byte[] neighbor = new byte[totalNeighbors];//o(totalNeighbors(windowsize^2))
+                    int size = 0;//o(1)
+                    for (int k = -edge; k <= edge; k++)//o(windowsize)
+                    {
+                        for (int l = -edge; l <= edge; l++)//o(windowsize)
+                        {
+                            neighbor[size++] = ImageMatrix[i + k, j + l];//o(1)
+                        }
+                    }
+
+                    int max = neighbor[0];//o(1)
+                    for (int x = 0; x < totalNeighbors; x++)//o(totalNeighbors)
+                    {
+                        if (max < neighbor[x])//o(1)
+                            max = neighbor[x];//o(1)
+                    }
+
+                    int min = neighbor[0];//o(1)
+                    for (int x = 0; x < totalNeighbors; x++)//o(totalNeighbors)
+                    {
+                        if (min > neighbor[x])//o(1)
+                            min = neighbor[x];//o(1)
+                    }
+
+                    newimage[i, j] = (byte)((max + min) / 2);//o(1)
+                }
+            }
+            return newimage;//o(1),overall complexity : theta(h*w*totalNeighbors)
+        }
+
+        // ===== Midpoint Filter (Efficient) =====
+        // Tracks max & min on the fly in a single pass — no extra array needed
+        public static byte[,] ApplyMidpointEfficient(byte[,] ImageMatrix, int windowSize)
+        {
+            int height = GetHeight(ImageMatrix);//o(1)
+            int width = GetWidth(ImageMatrix);//o(1)
+            byte[,] newimage = new byte[height, width];//o(h*w)
+            int edge = windowSize / 2;//o(1)
+
+            for (int i = edge; i < height - edge; i++)//o(h)
+            {
+                for (int j = edge; j < width - edge; j++)//o(w)
+                {
+                    int max = 0;//o(1)
+                    int min = 255;//o(1)
+                    for (int k = -edge; k <= edge; k++) //o(windowsize)
+                    {
+                        for (int l = -edge; l <= edge; l++)//o(windowsize)
+                        {
+                            int current = ImageMatrix[i + k, j + l];//o(1)
+                            if (current > max)//o(1)
+                                max = current;//o(1)
+                            if (current < min)//o(1)
+                                min = current;//o(1)
+                        }
+                    }
+                    newimage[i, j] = (byte)((max + min) / 2);//o(1)
+                }
+            }
+            return newimage;//o(1),overall complexity : theta(h*w*windowsize^2)
+        }
+
+        public static byte[,] MedianQuickSortFilter(byte[,] ImageMatrix, int windowSize)
+        {
+            int width = GetWidth(ImageMatrix);//o(1)
+            int height = GetHeight(ImageMatrix);//o(1)
+
+            byte[,] resultImage = new byte[height, width];//o(h*w)
+
+            int edge = windowSize / 2;//o(1)
+            int windowLength = windowSize * windowSize;//o(1)
+
+            for (int y = 0; y < height; y++)//o(h)
+            {
+                for (int x = 0; x < width; x++)//o(w)
+                {
+                    byte[] window = new byte[windowLength];//o(windowLength)
+
+                    int count = 0;//o(1)
+
+                    // Collect window elements
+                    for (int wy = -edge; wy <= edge; wy++)//o(windowsize)
+                    {
+                        for (int wx = -edge; wx <= edge; wx++)//o(windowsize)
+                        {
+                            int neighborY = y + wy;//o(1)
+                            int neighborX = x + wx;//o(1)
+
+                            // Boundary check
+                            if (neighborY < 0)//o(1)
+                                neighborY = 0;//o(1)
+
+                            if (neighborY >= height)//o(1)
+                                neighborY = height - 1;//o(1)
+
+                            if (neighborX < 0)//o(1)
+                                neighborX = 0;//o(1)
+
+                            if (neighborX >= width)//o(1)
+                                neighborX = width - 1;//o(1)
+
+                            window[count++] = ImageMatrix[neighborY, neighborX];//o(1)
+                        }
+                    }
+
+                    // Sort the window using Quick Sort
+                    QuickSort(window, 0, window.Length - 1);//o(windowsize^2 log windowsize^2)
+
+                    // Get the median
+                    resultImage[y, x] = window[windowLength / 2];//o(1),overall complexity : o(h*w*windowsize^2 log windowsize^2) -> o(h*w*windowsize^2 log windowsize)
+                }
+            }
+
+            return resultImage;//o(1)
+        }
+
+        public static void QuickSort(byte[] arr, int left, int right)
+        {
+            int i = left;//o(1)
+            int j = right;//o(1)
+
+
+            byte pivot = arr[(left + right) / 2];//o(1)
+           overall complexity od while loop is o(n)
+            while (i <= j)//o(n)
+            {
+
+                while (arr[i] < pivot)//o(n)
+                    i++;//o(1)
+
+                while (arr[j] > pivot)//o(n)
+                    j--;//o(1)
+
+                if (i <= j)//o(1)
+                {
+                    byte temp = arr[i];//o(1)
+                    arr[i] = arr[j];//o(1)
+                    arr[j] = temp;//o(1)
+
+                    i++;//o(1)
+                    j--;//o(1)
+                }
+            }
+
+            if (left < j)//o(1)
+                QuickSort(arr, left, j);//overall complexity : average theta (nlogn),worst : o(n^2)
+            if (i < right)//o(1)
+                QuickSort(arr, i, right);
+        }
+
+        int Partition(int[] arr, int low, int high)
+        {
+            int pivot = arr[high];//o(1)
+            int i = low - 1;//o(1)
+
+            for (int j = low; j < high; j++)//o(n)
+            {
+                if (arr[j] < pivot)//o(1)
+                {
+                    i++;//o(1)
+                    // swap
+                    int temp = arr[i];//o(1)
+                    arr[i] = arr[j];//o(1)
+                    arr[j] = temp;//o(1)
+                }
+            }
+
+            // swap pivot
+            int temp2 = arr[i + 1];//o(1)
+            arr[i + 1] = arr[high];//o(1)
+            arr[high] = temp2;//o(1)
+
+            return i + 1;//o(1)
+        }
+
+        public static byte[,] ApplyMedianFilter_SlidingWindow(byte[,] ImageMatrix, int windowSize)
+        {
+            int height = ImageMatrix.GetLength(0);//o(1)
+            int width = ImageMatrix.GetLength(1);//o(1)
+            byte[,] newImage = (byte[,])ImageMatrix.Clone();//o(h*w)
+
+            int offset = windowSize / 2;//o(1)
+            int medianIndex = (windowSize * windowSize) / 2;//o(1)
+            // Iterate over each row in the image
+            for (int y = offset; y < height - offset; y++) // o(h)
+            {
+                int[] histogram = new int[256];//o(1)
+                // 1. Initialization: Compute the histogram for the first window in the row only
+                for (int wy = -offset; wy <= offset; wy++)//o(windowsize)
+                {
+                    for (int wx = -offset; wx <= offset; wx++)//o(windowsize)
+                    {
+                        histogram[ImageMatrix[y + wy, offset + wx]]++;//o(1)
+                    }
+                }
+                // Find the median of the first pixel in the row
+                newImage[y, offset] = GetMedianFromHistogram(histogram, medianIndex);//o(1)
+                // 2. Sliding: Iterate over the remaining pixels in the same row
+                for (int x = offset + 1; x < width - offset; x++)//o(w)
+                {
+                    // a. Remove the old column (that left the window from the left)
+                    int leftColX = x - offset - 1;//o(1)
+                    for (int wy = -offset; wy <= offset; wy++)//o(windowsize)
+                    {
+                        histogram[ImageMatrix[y + wy, leftColX]]--;//o(1)
+                    }
+                    // b. Add the new column (that entered the window from the right)
+                    int rightColX = x + offset;//o(1)
+                    for (int wy = -offset; wy <= offset; wy++)//o(windowsize)
+                    {
+                        histogram[ImageMatrix[y + wy, rightColX]]++;//o(1)
+                    }
+                    // c. Find the median from the updated histogram directly
+                    newImage[y, x] = GetMedianFromHistogram(histogram, medianIndex);//o(1)
+                }
+            }
+            return newImage;//o(1)
+        }
+        // Fast helper function to extract the median from a ready histogram
+        private static byte GetMedianFromHistogram(int[] histogram, int medianIndex)
+        {
+            int cumulativeCount = 0;//o(1)
+            for (int i = 0; i < 256; i++)//o(1)
+            {
+                cumulativeCount += histogram[i];//o(1)
+                if (cumulativeCount > medianIndex)//o(1)
+                {
+                    return (byte)i;//o(1)
+                }
+            }
+            return 0;//o(1)
+        }
+
+    }
+}
